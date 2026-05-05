@@ -31,11 +31,21 @@ class TaskerScraper:
         # 登入邏輯（根據實際網站結構調整）
         def login_action(page):
             try:
+                # 等待登入頁面載入
+                page.wait_for_load_state('networkidle', timeout=10000)
+                logger.debug("登入頁面載入完成")
+
+                # 檢查登入表單是否存在
+                mobile_input = page.query_selector('input[name="mobile"]')
+                password_input = page.query_selector('input[name="password"]')
+                submit_button = page.query_selector('button[type="submit"]')
+
                 # 填寫手機號碼（新登入頁面使用 mobile 欄位）
                 page.fill('input[name="mobile"]', self.config.USERNAME)
                 # 填寫密碼
                 page.fill('input[name="password"]', self.config.PASSWORD)
-                
+                logger.debug("登入資訊已填寫")
+
                 # 處理『記住我』功能
                 if self.config.REMEMBER_ME:
                     # 點擊包含checkbox的label來勾選記住我
@@ -50,7 +60,7 @@ class TaskerScraper:
                         logger.info("ℹ️  無法勾選『記住我』選項，將使用持久化 cookies")
                 else:
                     logger.info("ℹ️  『記住我』功能已停用")
-                
+
                 # 點擊登入按鈕
                 page.click('button[type="submit"]')
                 logger.info("登入表單提交完成")
@@ -515,7 +525,7 @@ class TaskerScraper:
         """
         logger.info(f"開始搜尋案件，關鍵字: '{keywords}', 返回前 {top} 筆")
         
-        # 創建會話配置
+        # 建立會話配置
         session_kwargs = {
             'headless': self.config.HEADLESS
         }

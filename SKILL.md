@@ -143,5 +143,5 @@ python scripts/search.py --top 10
 
 ## 參考資源
 
-- 參考文檔: `references/REFERENCE.md`
+- 參考文件: `references/REFERENCE.md`
 - 技術細節: `references/TECHNICAL.md`

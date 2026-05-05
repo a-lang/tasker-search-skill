@@ -47,7 +47,7 @@ def test_remember_me():
             print(f'   ✓ 找到持久化數據目錄: {user_data_dir}')
         else:
             print(f'   ✗ 未找到持久化數據目錄: {user_data_dir}')
-            print('   這將進行首次登入並創建持久化數據')
+            print('   這將進行首次登入並建立持久化數據')
         print('')
         
         # 測試登入流程
@@ -93,14 +93,37 @@ def test_remember_me():
             )
             
             # 檢查登入狀態
-            auth_content = test_page.body.decode('utf-8')
-            
-            if '案主' in auth_content or '專家' in auth_content:
+            print('   檢查登入狀態...')
+            all_text = test_page.css('::text').getall()
+
+            member_code_found = False
+            logout_found = False
+            login_found = False
+
+            for text in all_text:
+                if '會員代碼' in text or '會員編號' in text:
+                    member_code_found = True
+                    # 提取會員代碼
+                    if '會員代碼：' in text:
+                        member_code = text.split('會員代碼：')[1].strip()
+                        print(f'   ✓ 會員代碼: {member_code}')
+                    break
+                if '登出' in text or 'logout' in text.lower():
+                    logout_found = True
+                    break
+                if '登入' in text and '立即' in text:
+                    login_found = True
+                    break
+
+            if member_code_found:
                 print('✅ 使用持久化 cookies 登入成功！')
                 print('   『記住我』功能正常運作')
-            elif '登入' in auth_content or '登錄' in auth_content:
+            elif logout_found:
+                print('✅ 使用持久化 cookies 登入成功！')
+                print('   『記住我』功能正常運作')
+            elif login_found:
                 print('⚠️  需要重新登入，執行登入流程...')
-                
+
                 # 執行登入
                 session.fetch(
                     Config.LOGIN_URL,
@@ -108,7 +131,7 @@ def test_remember_me():
                     network_idle=True
                 )
                 print('   ✓ 登入流程執行完成')
-                
+
                 # 再次嘗試訪問
                 import time
                 time.sleep(2)
@@ -117,9 +140,16 @@ def test_remember_me():
                     headless=True,
                     network_idle=True
                 )
-                
-                auth_content = test_page.body.decode('utf-8')
-                if '案主' in auth_content or '專家' in auth_content:
+
+                all_text = test_page.css('::text').getall()
+                member_code_found = False
+
+                for text in all_text:
+                    if '會員代碼' in text or '會員編號' in text:
+                        member_code_found = True
+                        break
+
+                if member_code_found:
                     print('✅ 登入成功！cookies 已持久化保存')
                 else:
                     print('❌ 登入失敗')
@@ -129,7 +159,7 @@ def test_remember_me():
             
             print('')
             
-            # 檢查持久化數據是否被創建
+                # 檢查持久化數據是否被建立
             if os.path.exists(user_data_dir):
                 print(f'✅ 持久化數據已保存: {user_data_dir}')
                 print(f'   下次執行時將自動使用這些 cookies')

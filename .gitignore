@@ -15,7 +15,7 @@ ENV/
 *.egg-info/
 dist/
 build/
-scripts/__init__.py
+__init__.py
 
 # IDE 相關
 .vscode/
@@ -30,9 +30,9 @@ output/
 # !README.md
 !README.md
 !SKILL.md
+!references/
 CHANGELOG.md
 docs/
-references/
 
 # 日誌文件
 *.log

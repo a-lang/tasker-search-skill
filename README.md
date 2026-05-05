@@ -31,7 +31,7 @@ python scripts/search.py --top 5
 
 詳見 [SKILL.md](SKILL.md)。
 
-## 文檔
+## 文件
 
 - [SKILL.md](SKILL.md) - Skill 定義
 - [設計文件](docs/superpowers/specs/2026-05-04-tasker-case-search-design.md) - 完整設計
@@ -70,7 +70,7 @@ pip install -r requirements.txt
    ```
 
 2. **重要配置項**：
-   - `TASKER_ID`: 您的身分證字號或統一編號
+   - `TASKER_ID`: 您的用戶名稱
    - `TASKER_PASSWORD`: 您的登入密碼
    - `HEADLESS_MODE`: 是否使用無頭瀏覽器（true/false）
    - `REMEMBER_ME`: 是否啟用『記住我』功能（true/false），預設為 true
@@ -215,7 +215,7 @@ tasker-search-skill/
 ## 支持與貢獻
 
 如有問題或建議，請通過以下方式聯繫：
-- 創建 Issue
+- 建立 Issue
 - 發送 Pull Request
 
 ---

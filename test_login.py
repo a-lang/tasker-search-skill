@@ -30,20 +30,33 @@ def test_login():
         print(f'   記住我: {"啟用" if Config.REMEMBER_ME else "停用"}')
         print('')
         
-        # 創建登入動作
+        # 建立登入動作
         def login_action(page):
             """執行登入動作"""
             print('🔐 執行登入動作...')
-            
+
             try:
+                # 等待登入頁面載入
+                page.wait_for_load_state('networkidle', timeout=10000)
+                print('   ✓ 登入頁面載入完成')
+
+                # 檢查登入表單是否存在
+                mobile_input = page.query_selector('input[name="mobile"]')
+                password_input = page.query_selector('input[name="password"]')
+                submit_button = page.query_selector('button[type="submit"]')
+
+                if not mobile_input or not password_input or not submit_button:
+                    print('   ⚠️ 登入表單元素未找到，可能頁面結構已改變')
+                    return
+
                 # 填寫手機號碼
                 page.fill('input[name="mobile"]', Config.USERNAME)
-                print('   ✓ 手機號碼已填寫')
-                
+                print(f'   ✓ 手機號碼已填寫: {Config.USERNAME[:2]}***{Config.USERNAME[-2:]}')
+
                 # 填寫密碼
                 page.fill('input[name="password"]', Config.PASSWORD)
                 print('   ✓ 密碼已填寫')
-                
+
                 # 處理『記住我』功能
                 if Config.REMEMBER_ME:
                     try:
@@ -56,11 +69,11 @@ def test_login():
                         print('   ℹ️  無法勾選『記住我』選項，將使用持久化 cookies')
                 else:
                     print('   ℹ️  『記住我』功能已停用')
-                
+
                 # 點擊登入按鈕
                 page.click('button[type="submit"]')
                 print('   ✓ 登入按鈕已點擊')
-                
+
             except Exception as e:
                 print(f'   ❌ 登入動作失敗: {e}')
                 raise
@@ -68,7 +81,7 @@ def test_login():
         print('🌐 啟動瀏覽器會話...')
         print('')
         
-        # 創建會話配置
+        # 建立會話配置
         session_kwargs = {
             'headless': True,
             'network_idle': True
@@ -113,15 +126,36 @@ def test_login():
                 print(f'   頁面長度: {len(test_page.body)} bytes')
                 print('')
                 
-                # 檢查頁面內容是否包含登出或用戶相關元素
-                # 使用標準的 CSS 選擇器
-                logout_buttons = test_page.css('button, a')
-                has_logout = any('登出' in button.text for button in logout_buttons)
-                has_login = any('登入' in button.text for button in logout_buttons)
-                
-                if has_logout:
+                # 檢查頁面內容是否包含會員代碼或登出按鈕
+                print('   檢查登入狀態...')
+
+                # 使用標準的 CSS 選擇器獲取所有文字
+                all_text = test_page.css('::text').getall()
+
+                member_code_found = False
+                logout_found = False
+                login_found = False
+
+                for text in all_text:
+                    if '會員代碼' in text or '會員編號' in text:
+                        member_code_found = True
+                        # 提取會員代碼
+                        if '會員代碼：' in text:
+                            member_code = text.split('會員代碼：')[1].strip()
+                            print(f'   ✓ 會員代碼: {member_code}')
+                        break
+                    if '登出' in text or 'logout' in text.lower():
+                        logout_found = True
+                        break
+                    if '登入' in text and '立即' in text:
+                        login_found = True
+                        break
+
+                if member_code_found:
+                    print('✅ 登入成功！檢測到會員代碼')
+                elif logout_found:
                     print('✅ 登入成功！檢測到登出按鈕')
-                elif has_login:
+                elif login_found:
                     print('⚠️  可能仍在登入頁面，請檢查登入資訊')
                 else:
                     print('✅ 登入成功（能夠訪問案件頁面）')
