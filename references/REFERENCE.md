@@ -48,10 +48,12 @@
 - 手機號碼輸入框: `input[name="mobile"]`
 - 密碼輸入框: `input[name="password"]`
 - 記住我功能: `label:has(.box-remind)`
+- Lightbox 彈窗: `.box-lightbox`（所有頁面互動前必須先關閉）
 
 ### 案件頁面
-- 搜尋輸入框: `input[placeholder*="案件"]`
-- 案件連結: `a[href*="/cases/"]`
+- 搜尋輸入框: `input[placeholder*="案件"]`（備用: `input[type="search"]`, `input[name="keyword"]`）
+- 搜尋按鈕: `button[type="submit"], button[class*="search"]`（fallback: 按 Enter 鍵）
+- 案件連結: 用正則 `/cases/TK[A-Za-z0-9]+` 過濾
 
 ### 案件詳細頁面
 - 標題: `h1, .case-title, [class*="title"]`

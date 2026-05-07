@@ -1,8 +1,9 @@
 import os
+import re
 import time
 import logging
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from scrapling.fetchers import DynamicFetcher, DynamicSession
 from config import Config
 
@@ -21,19 +22,96 @@ class TaskerScraper:
         self.config.validate()
         self.session = None
         
+    def _dismiss_lightbox(self, page, timeout=3000):
+        """嘗試關閉頁面上的 lightbox / modal 彈窗
+
+        支援 Playwright Page 物件（page_action 回呼內）和 Scrapling Adaptor 物件（session.fetch 回傳值）。
+
+        Args:
+            page: Playwright 頁面物件或 Scrapling Adaptor 物件
+            timeout: 等待彈窗出現的毫秒數
+        """
+        try:
+            is_playwright = hasattr(page, 'query_selector')
+
+            if is_playwright:
+                # Playwright Page — 可以點擊和執行 JS
+                close_btn = page.query_selector('.box-lightbox .close, .box-lightbox [class*="close"], .box-lightbox button[class*="close"]')
+                if close_btn:
+                    try:
+                        close_btn.click(timeout=timeout)
+                        logger.info("✓ 已關閉 lightbox（點擊關閉按鈕）")
+                        time.sleep(0.5)
+                        return
+                    except Exception:
+                        pass
+
+                lightbox = page.query_selector('.box-lightbox')
+                if lightbox:
+                    page.evaluate('''() => {
+                        const overlays = document.querySelectorAll('.box-lightbox');
+                        overlays.forEach(el => el.style.display = 'none');
+                    }''')
+                    logger.info("✓ 已隱藏 lightbox")
+                    time.sleep(0.3)
+                    return
+            else:
+                # Scrapling Adaptor — 只能用 CSS 選擇器偵測，無法互動
+                lightbox_elements = page.css('.box-lightbox')
+                if lightbox_elements:
+                    logger.info("✓ 偵測到 lightbox（Scrapling Adaptor 無法關閉，資料提取不受影響）")
+
+            logger.debug("未偵測到 lightbox，無需關閉")
+        except Exception as e:
+            logger.debug(f"關閉 lightbox 時發生錯誤（可忽略）: {e}")
+
+    def _check_logged_in(self, session):
+        """檢查是否已登入
+
+        Args:
+            session: DynamicSession 物件
+
+        Returns:
+            bool: 是否已登入
+        """
+        try:
+            logger.info("檢查登入狀態...")
+            page = session.fetch(self.config.CASES_URL, headless=self.config.HEADLESS, network_idle=True)
+
+            # 關閉可能出現的 lightbox 彈窗
+            self._dismiss_lightbox(page)
+
+            all_text = page.css('::text').getall()
+
+            for text in all_text:
+                if '會員代碼' in text or '會員編號' in text:
+                    logger.info("✓ 已登入（偵測到會員代碼）")
+                    return True
+                if '登出' in text or 'logout' in text.lower():
+                    logger.info("✓ 已登入（偵測到登出按鈕）")
+                    return True
+                if '立即登入' in text or '立即註冊' in text:
+                    logger.info("✗ 未登入（偵測到登入提示）")
+                    return False
+
+            logger.info("⚠ 無法判斷登入狀態，假設未登入")
+            return False
+        except Exception as e:
+            logger.warning(f"檢查登入狀態時發生錯誤: {e}")
+            return False
+
     def perform_login(self, session):
         """執行登入操作"""
         logger.info("開始登入 Tasker...")
-        
-        # 導航到登入頁面
-        login_page = session.fetch(self.config.LOGIN_URL, headless=self.config.HEADLESS)
-        
-        # 登入邏輯（根據實際網站結構調整）
+
         def login_action(page):
             try:
                 # 等待登入頁面載入
                 page.wait_for_load_state('networkidle', timeout=10000)
                 logger.debug("登入頁面載入完成")
+
+                # 關閉可能出現的 lightbox 彈窗
+                self._dismiss_lightbox(page)
 
                 # 檢查登入表單是否存在
                 mobile_input = page.query_selector('input[name="mobile"]')
@@ -99,11 +177,13 @@ class TaskerScraper:
                 # 等待頁面載入
                 page.wait_for_load_state('networkidle', timeout=30000)
                 logger.info("✓ 案件頁面載入完成")
-                
+
+                # 關閉可能出現的 lightbox 彈窗
+                self._dismiss_lightbox(page)
+
                 # 如果有關鍵字，執行搜尋
                 if keywords and keywords.strip():
                     # 將逗號和空格都轉換為統一的空格分隔
-                    import re
                     search_keywords = re.sub(r'[,\s]+', ' ', keywords).strip()
                     logger.info(f"原始關鍵字: '{keywords}'")
                     logger.info(f"處理後關鍵字: '{search_keywords}'")
@@ -111,8 +191,11 @@ class TaskerScraper:
                     # 填寫搜尋框
                     search_input = page.query_selector('input[placeholder*="案件"]')
                     if not search_input:
-                        logger.error("✗ 找不到搜尋輸入框")
-                        return
+                        search_input = page.query_selector('input[type="search"]')
+                    if not search_input:
+                        search_input = page.query_selector('input[name="keyword"], input[name="search"], input[name="q"]')
+                    if not search_input:
+                        raise RuntimeError("找不到搜尋輸入框，無法執行搜尋")
                     
                     # 填寫關鍵字
                     search_input.fill(search_keywords)
@@ -121,14 +204,24 @@ class TaskerScraper:
                     actual_value = search_input.input_value()
                     logger.info(f"✓ 已填寫搜尋關鍵字: '{actual_value}'")
                     
-                    # 點擊搜尋按鈕
-                    # 注意: 可能需要等待一段時間讓頁面穩定
-                    import time
+                    # 先嘗試點擊搜尋按鈕，再 fallback 到按 Enter
                     time.sleep(1)
-                    
-                    # 提交表單（按 Enter 鍵）
-                    search_input.press('Enter')
-                    logger.info("✓ 已提交搜尋")
+
+                    # 再次確認沒有 lightbox 遮擋
+                    self._dismiss_lightbox(page)
+
+                    search_button = page.query_selector('button[type="submit"], button[class*="search"], button[aria-label*="搜尋"], button[aria-label*="search"]')
+                    if search_button:
+                        try:
+                            search_button.click(timeout=5000)
+                            logger.info("✓ 已點擊搜尋按鈕提交搜尋")
+                        except Exception as e:
+                            logger.warning(f"點擊搜尋按鈕失敗（可能被遮擋）: {e}，改用 Enter 鍵")
+                            search_input.press('Enter')
+                            logger.info("✓ 已按 Enter 鍵提交搜尋")
+                    else:
+                        search_input.press('Enter')
+                        logger.info("✓ 已按 Enter 鍵提交搜尋")
                     
                     # 等待搜尋結果載入
                     page.wait_for_load_state('networkidle', timeout=30000)
@@ -149,18 +242,24 @@ class TaskerScraper:
             
             # 提取案件連結
             case_links = []
-            
-            # 查找所有案件連結
-            # 注意: 需要根據實際頁面結構調整選擇器
+
+            # 查找所有案件連結，用正則過濾案件 ID 格式
+            # 案件 ID 格式: TK 開頭，後接英數字
+            case_id_pattern = re.compile(r'^/cases/(TK[A-Za-z0-9]+)/?$')
             links = page.css('a[href*="/cases/"]')
             logger.info(f"找到 {len(links)} 個可能的案件連結")
-            
-            for link in links[:100]:  # 限制最多 100 個連結
+
+            seen_ids = set()
+            for link in links:
                 href = link.css('::attr(href)').get('')
-                if href and href.startswith('/cases/'):
-                    full_url = f"{self.config.BASE_URL}{href}"
-                    # 過濾掉非案件頁面（如 /cases/top）
-                    if full_url not in case_links and not full_url.endswith('/cases/top'):
+                if not href:
+                    continue
+                match = case_id_pattern.match(href)
+                if match:
+                    case_id = match.group(1)
+                    if case_id not in seen_ids:
+                        seen_ids.add(case_id)
+                        full_url = f"{self.config.BASE_URL}{href}"
                         case_links.append(full_url)
             
             logger.info(f"提取到 {len(case_links)} 個唯一案件連結")
@@ -189,31 +288,40 @@ class TaskerScraper:
                 
                 # 載入案件頁面
                 page = session.fetch(url, headless=self.config.HEADLESS, network_idle=True)
-                
+
+                # 關閉可能出現的 lightbox 彈窗
+                self._dismiss_lightbox(page)
+
                 # 提取案件資訊
+                title_value, _ = self.extract_text(page, 'h1')
+                budget_value, budget_src = self.extract_from_meta(page, '預算')
+                location_value, location_src = self.extract_from_meta(page, '地點')
+
+                # 如果沒有從 meta 提取到，嘗試從頁面元素提取
+                if budget_value == 'N/A':
+                    budget_value, budget_src = self.extract_text(page, '[class*="budget"], [class*="price"], [class*="money"]')
+                if location_value == 'N/A':
+                    location_value, location_src = self.extract_text(page, '[class*="location"], [class*="place"], [class*="area"]')
+
                 case_data = {
-                    'title': self.extract_text(page, 'h1'),
+                    'title': title_value,
                     'case_id': self.extract_case_id(url),
-                    'budget': self.extract_from_meta(page, '預算'),
-                    'location': self.extract_from_meta(page, '地點'),
+                    'budget': budget_value,
+                    'budget_src': budget_src,
+                    'location': location_value,
+                    'location_src': location_src,
                     'identity': self.extract_identity(page),
                     'update_time': self.extract_update_time(page),
                     'description': self.extract_description(page),
                     'link': url
                 }
-                
-                # 如果沒有從 meta 提取到，嘗試從頁面元素提取
-                if case_data['budget'] == 'N/A':
-                    case_data['budget'] = self.extract_text(page, '[class*="budget"], [class*="price"], [class*="money"]')
-                if case_data['location'] == 'N/A':
-                    case_data['location'] = self.extract_text(page, '[class*="location"], [class*="place"], [class*="area"]')
-                
-                # 只保留有標題的案件
-                if case_data['title'] and case_data['title'] != 'N/A':
-                    cases.append(case_data)
-                    logger.info(f"✓ 提取案件 {i}: {case_data['title']}")
+
+                # 保留所有案件，包含無標題的
+                cases.append(case_data)
+                if title_value and title_value != 'N/A':
+                    logger.info(f"✓ 提取案件 {i}: {title_value}")
                 else:
-                    logger.warning(f"✗ 案件 {i} 沒有標題，跳過")
+                    logger.warning(f"⚠ 案件 {i} 沒有標題，仍保留")
                     
             except Exception as e:
                 logger.warning(f"✗ 提取案件 {i} 時發生錯誤: {e}")
@@ -224,53 +332,55 @@ class TaskerScraper:
     
     def extract_from_meta(self, page, field):
         """從 meta description 中提取資訊
-        
+
         Args:
             page: 頁面物件
             field (str): 欄位名稱（預算、地點等）
-            
+
         Returns:
-            str: 提取的值，如果找不到則返回 'N/A'
+            tuple: (提取的值, 資料來源) 如果找不到則返回 ('N/A', 'N/A')
         """
         try:
-            import re
             # 獲取 meta description
             meta_desc = page.css('meta[name="description"]')
             if meta_desc:
                 content = meta_desc[0].css('::attr(content)').get('')
-                
+
                 # 按特殊字符分割
                 parts = content.split('｜')
-                
+
                 # 查找匹配的欄位
                 for part in parts:
                     if field in part:
-                        # 提取冒號後的值
-                        if '：' in part:
-                            value = part.split('：', 1)[1].strip()
-                            return value
+                        # 同時支援全形和半形冒號
+                        for sep in ('：', ':'):
+                            if sep in part:
+                                value = part.split(sep, 1)[1].strip()
+                                if value:
+                                    return value, 'meta'
         except Exception:
             pass
-        return 'N/A'
+        return 'N/A', 'meta'
     
     def extract_text(self, page, selector):
         """從頁面提取文字
-        
+
         Args:
             page: 頁面物件
             selector (str): CSS 選擇器
-            
+
         Returns:
-            str: 提取的文字，如果找不到則返回 'N/A'
+            tuple: (提取的文字, 資料來源) 如果找不到則返回 ('N/A', 'element')
         """
         try:
             elem = page.css(selector)
             if elem:
-                text = elem[0].css('::text').get('').strip()
-                return text if text else 'N/A'
+                text_parts = elem[0].css('::text').getall()
+                text = ''.join(text_parts).strip()
+                return (text if text else 'N/A'), 'element'
         except Exception:
             pass
-        return 'N/A'
+        return 'N/A', 'element'
     
     def extract_case_id(self, url):
         """從 URL 提取案件 ID
@@ -291,28 +401,47 @@ class TaskerScraper:
     
     def extract_identity(self, page):
         """提取接案身份
-        
+
+        優先使用 li 遍歷方式（與 test_identity_structure.py 相同），
+        避免依賴 h2.parent（Scrapling Adaptor 可能不支援）。
+
         Args:
             page: 頁面物件
-            
+
         Returns:
             str: 接案身份，如果找不到則返回 'N/A'
         """
         try:
-            # 查找包含「接案身份」文字的 h2 元素
+            # 方法1：遍歷 li 元素，找到包含「接案身份」的 li，再取其 p 元素
+            li_elements = page.css('li')
+            for li in li_elements:
+                li_text_parts = li.css('::text').getall()
+                li_text = ''.join(li_text_parts)
+                if '接案身份' in li_text:
+                    p_elements = li.css('p')
+                    if p_elements:
+                        identity_parts = p_elements[0].css('::text').getall()
+                        identity_text = ''.join(identity_parts).strip()
+                        if identity_text:
+                            return identity_text
+
+            # 方法2：查找包含「接案身份」的 h2，然後找同層級 p
             h2_elements = page.css('h2')
             for h2 in h2_elements:
-                h2_text = h2.css('::text').get('').strip()
+                h2_text_parts = h2.css('::text').getall()
+                h2_text = ''.join(h2_text_parts).strip()
                 if '接案身份' in h2_text:
-                    # 找到 h2 元素後，獲取同一個父元素（li）內的 p 元素
-                    parent = h2.parent
-                    if parent:
-                        # 查找父元素內的 p 元素（接案身份的值）
-                        p_elements = parent.css('p')
-                        if p_elements:
-                            identity_text = p_elements[0].css('::text').get('').strip()
-                            if identity_text:
-                                return identity_text
+                    try:
+                        parent = h2.parent
+                        if parent:
+                            p_elements = parent.css('p')
+                            if p_elements:
+                                identity_parts = p_elements[0].css('::text').getall()
+                                identity_text = ''.join(identity_parts).strip()
+                                if identity_text:
+                                    return identity_text
+                    except Exception:
+                        pass
                     break
         except Exception:
             pass
@@ -320,34 +449,31 @@ class TaskerScraper:
     
     def extract_update_time(self, page):
         """提取更新時間
-        
+
         Args:
             page: 頁面物件
-            
+
         Returns:
-            str: 更新時間，如果找不到則返回 'N/A'
+            str: 更新時間原始文字，如果找不到則返回 'N/A'
         """
         try:
             # 查找包含「更新」文字的 span 元素
             spans = page.css('span')
             for span in spans:
-                text = span.css('::text').get('').strip()
-                if '更新' in text:
-                    # 提取時間部分（格式：2026/05/04 更新）
-                    import re
-                    match = re.search(r'(\d{4}/\d{2}/\d{2})', text)
-                    if match:
-                        return match.group(1)
+                text_parts = span.css('::text').getall()
+                full_text = ''.join(text_parts).strip()
+                if '更新' in full_text:
+                    return full_text
         except Exception:
             pass
         return 'N/A'
-    
+
     def extract_description(self, page):
         """提取案件描述（需求說明）
-        
+
         Args:
             page: 頁面物件
-            
+
         Returns:
             str: 提取的描述，如果找不到則返回 'N/A'
         """
@@ -355,28 +481,31 @@ class TaskerScraper:
             # 查找「需求說明」標題元素
             titles = page.css('h2.f-title-s')
             description_title = None
-            
+
             for title in titles:
-                title_text = title.css('::text').get('').strip()
+                title_text_parts = title.css('::text').getall()
+                title_text = ''.join(title_text_parts).strip()
                 if '需求說明' in title_text:
                     description_title = title
                     break
-            
+
             if description_title:
                 # 從「需求說明」標題開始，遍歷後續兄弟元素
                 siblings = description_title.xpath('following-sibling::*')
-                
+                paragraphs = []
+
                 for sibling in siblings:
                     # 檢查元素標籤
                     tag = sibling.tag if hasattr(sibling, 'tag') else ''
-                    
+
                     # 如果遇到新的 h2 標題，停止
                     if tag == 'h2':
                         break
-                    
+
                     # 如果遇到段落，提取文字
                     if tag == 'p':
-                        text = sibling.css('::text').get('')
+                        text_parts = sibling.css('::text').getall()
+                        text = ''.join(text_parts).strip()
                         if text:
                             # 檢查是否為頁面元素
                             if any(keyword in text for keyword in ['查看完整需求', '登入後即可完整查看', '我要提案', '收藏', '客服時間']):
@@ -390,13 +519,17 @@ class TaskerScraper:
                             # 檢查是否為狀態
                             if any(keyword in text for keyword in ['上線中', 'Email已驗證', '總閱覽', '發現資訊有誤', '您可能感興趣']):
                                 continue
-                            # 添加到描述
-                            return text
-                
+                            # 收集段落
+                            paragraphs.append(text)
+
+                if paragraphs:
+                    return '\n'.join(paragraphs)
+
                 # 如果沒有找到明確的描述，返回提示
                 return "詳情見頁面"
-            
+
             # 如果沒有找到「需求說明」標題，返回提示
+            return "詳情見頁面"
             return "詳情見頁面"
                 
         except Exception as e:
@@ -404,33 +537,81 @@ class TaskerScraper:
             pass
         return 'N/A'
     
+    def _parse_time_for_sort(self, time_str):
+        """解析時間字串為 datetime 用於排序
+
+        支援格式：
+        - 完整日期: 2026/05/04
+        - 天數前: 3天前、5天前更新
+        - 小時前: 2小時前、8小時前更新
+        - 分鐘前: 30分鐘前、5分鐘前更新
+        - 今天: 今天 14:30
+
+        Args:
+            time_str (str): 時間字串
+
+        Returns:
+            datetime: 解析後的時間，無法解析時返回 datetime.min
+        """
+        if not time_str or time_str == 'N/A':
+            return datetime.min
+
+        now = datetime.now()
+
+        # 完整日期: YYYY/MM/DD
+        m = re.search(r'(\d{4}/\d{2}/\d{2})', time_str)
+        if m:
+            try:
+                return datetime.strptime(m.group(1), '%Y/%m/%d')
+            except ValueError:
+                pass
+
+        # N天前 / N天前更新
+        m = re.search(r'(\d+)\s*天前', time_str)
+        if m:
+            return now - timedelta(days=int(m.group(1)))
+
+        # N小時前 / N小時前更新
+        m = re.search(r'(\d+)\s*小時前', time_str)
+        if m:
+            return now - timedelta(hours=int(m.group(1)))
+
+        # N分鐘前 / N分鐘前更新
+        m = re.search(r'(\d+)\s*分鐘前', time_str)
+        if m:
+            return now - timedelta(minutes=int(m.group(1)))
+
+        # 今天 HH:MM
+        if '今天' in time_str:
+            m = re.search(r'(\d{1,2}):(\d{2})', time_str)
+            if m:
+                return now.replace(hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+            return now
+
+        # 昨天 HH:MM
+        if '昨天' in time_str:
+            m = re.search(r'(\d{1,2}):(\d{2})', time_str)
+            if m:
+                return (now - timedelta(days=1)).replace(hour=int(m.group(1)), minute=int(m.group(2)), second=0, microsecond=0)
+            return now - timedelta(days=1)
+
+        return datetime.min
+
     def sort_cases_by_time(self, cases):
         """按時間排序案件（最新的在前）
-        
+
         Args:
             cases (list): 案件資料列表
-            
+
         Returns:
             list: 排序後的案件列表
         """
-        def parse_time(time_str):
-            """解析時間字串"""
-            try:
-                # 嘗試解析各種時間格式
-                from datetime import datetime
-                # 這裡需要根據實際時間格式調整
-                # 簡單的實現：如果無法解析，返回最早的日期
-                return datetime.min
-            except:
-                return datetime.min
-        
-        # 按時間排序
         sorted_cases = sorted(
             cases,
-            key=lambda x: parse_time(x['update_time']),
-            reverse=True  # 最新的在前
+            key=lambda x: self._parse_time_for_sort(x['update_time']),
+            reverse=True
         )
-        
+
         return sorted_cases
     
     def print_results(self, keywords, cases):
@@ -540,8 +721,12 @@ class TaskerScraper:
         
         # 使用 with 語句管理 session 生命週期
         with DynamicSession(**session_kwargs) as session:
-            # 執行登入
-            self.perform_login(session)
+            # 先檢查是否已登入，避免重複登入
+            if not self._check_logged_in(session):
+                logger.info("未登入，執行登入流程...")
+                self.perform_login(session)
+            else:
+                logger.info("✓ 已登入，跳過登入流程")
             
             # 搜尋案件
             case_links = self.search_cases(session, keywords)
