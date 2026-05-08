@@ -11,9 +11,10 @@ Tasker 案件搜尋 Skill — 使用 Scrapling/Playwright 自動化爬取 tasker
 ## 環境設定
 
 ```bash
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-playwright install chromium   # 必須，pip install 不會自動裝瀏覽器
-cp .env.sample .env           # 填入 TASKER_ID 和 TASKER_PASSWORD
+scrapling install               # 必須，安裝瀏覽器及其依賴
+cp .env.example .env           # 填入 TASKER_ID 和 TASKER_PASSWORD
 ```
 
 .env 必填：`TASKER_ID`、`TASKER_PASSWORD`。缺少會在 `Config.validate()` 拋錯。

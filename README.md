@@ -1,19 +1,34 @@
 # Tasker 案件搜尋 Skill
 
-符合 Agent Skills 標準的 Tasker 案件搜尋工具，讓 AI Agent 能夠搜尋 tasker.com.tw 上的「我要接案」案件。
+符合 [Agent Skills](https://agentskills.io/) 規範的 Tasker 案件搜尋工具，讓 AI Agent 能夠搜尋 tasker.com.tw 上的「我要接案」案件。
 
 ## 快速開始
 
 ### 安裝依賴
 
+建議使用虛擬環境：
+
 ```bash
+python -m venv .venv
+source .venv/bin/activate   # Linux/macOS
+# .venv\Scripts\activate    # Windows
+
 pip install -r requirements.txt
-playwright install chromium
+scrapling install
 ```
 
 ### 配置
 
-複製 `.env.example` 到 `.env` 並填寫您的登入資訊。
+```bash
+cp .env.example .env
+```
+
+編輯 `.env`，填入登入資訊：
+
+```
+TASKER_ID=你的手機號碼或身分證字號
+TASKER_PASSWORD=你的登入密碼
+```
 
 ### 使用
 
@@ -21,204 +36,53 @@ playwright install chromium
 # 搜尋特定關鍵字
 python scripts/search.py --keywords "Linux,Asterisk" --top 5
 
-# 獲取最新案件
-python scripts/search.py --top 5
+# 獲取最新案件（不篩選關鍵字）
+python scripts/search.py --top 10
 ```
 
-## Skill 使用
+**CLI 參數：**
 
-此專案符合 [Agent Skills 規範](https://agentskills.io/)，可被 AI Agent 調用。
+| 參數 | 說明 | 預設值 |
+|------|------|--------|
+| `--keywords` | 搜尋關鍵字，多個用逗號分隔 | 空字串（不篩選） |
+| `--top` | 返回案件數量 | 5（範圍 1-100） |
 
-詳見 [SKILL.md](SKILL.md)。
-
-## 文件
-
-- [SKILL.md](SKILL.md) - Skill 定義
-- [設計文件](docs/superpowers/specs/2026-05-04-tasker-case-search-design.md) - 完整設計
-- [技術參考](references/REFERENCE.md) - 技術參考
-- [技術細節](references/TECHNICAL.md) - 技術細節
-
----
-
-# Tasker 爬蟲專案（舊版）
-
-這是一個使用 Scrapling 框架開發的自動化爬蟲，用於抓取 Tasker (出任務) 網站的案件數據。
-
-## 功能特點
-
-- ✅ 自動化登入功能（手機號碼/身分證字號登入）
-- ✅ **『記住我』功能**（持久化登入狀態，無需重複登入）
-- ✅ 案件列表數據抓取
-- ✅ Markdown 格式輸出
-- ✅ Headless 瀏覽器模式
-- ✅ 錯誤處理和日誌記錄
-- ✅ 環境變數配置
-
-## 安裝依賴
-
-```bash
-pip install -r requirements.txt
-```
-
-## 配置說明
-
-1. **複製並編輯環境變數文件**：
-   ```bash
-   # 編輯 .env 文件，填寫您的登入資訊
-   TASKER_ID=your_id_number_here
-   TASKER_PASSWORD=your_password_here
-   ```
-
-2. **重要配置項**：
-   - `TASKER_ID`: 您的用戶名稱
-   - `TASKER_PASSWORD`: 您的登入密碼
-   - `HEADLESS_MODE`: 是否使用無頭瀏覽器（true/false）
-   - `REMEMBER_ME`: 是否啟用『記住我』功能（true/false），預設為 true
-   - `MAX_PAGES`: 最大爬取頁數
-   - `SCRAPER_DELAY`: 請求延遲時間（秒）
-
-3. **關於『記住我』功能**：
-   - 預設啟用，會將登入 cookies 保存在系統臨時目錄
-   - 通過點擊登入頁面的「記住我」選項來啟用
-   - 啟用後後續執行時無需重新登入
-   - 持久化數據保存在 `/tmp/tasker_user_data_[用戶名]` 目錄
-
-## 使用方法
-
-### 基本使用
-
-```bash
-python scraper.py
-```
-
-### 運行後
-
-- 爬蟲會自動登入 Tasker 網站
-- 抓取案件列表數據
-- 將結果保存為 Markdown 格式
-- 輸出文件位於 `output/` 目錄
-
-## 輸出格式
-
-輸出文件為 Markdown 格式，包含以下信息：
-
-```markdown
-# Tasker 案件數據報告
-
-**生成時間**: 2026-05-04 15:00:00  
-**案件總數**: X 筆
-
-## 案件列表
-
-### 案件 1
-
-**標題**: 案件標題
-
-- **金額**: $X
-- **地點**: 地點
-- **時間**: 時間
-- **網址**: 案件網址
-
-**描述**: 案件描述
-
-**標籤**: 標籤1, 標籤2
-```
-
-## 項目結構
+## 專案架構
 
 ```
 tasker-search-skill/
-├── .env              # 環境變數配置（不提交到版本控制）
-├── .gitignore        # Git 忽略文件
-├── config.py         # 配置管理
-├── scraper.py        # 主要爬蟲程式
-├── requirements.txt  # Python 依賴
-├── output/          # 輸出目錄
-│   └── cases_data_YYYYMMDD_HHMMSS.md
-└── README.md        # 本文件
+├── scripts/search.py   # CLI 入口
+├── scraper.py          # TaskerScraper 核心爬蟲
+├── config.py           # Config 配置類
+├── SKILL.md            # Agent Skills 規範定義
+├── references/         # CSS 選擇器與技術參考
+├── .env.example        # 環境變數範本
+└── requirements.txt    # Python 依賴
 ```
+
+輸出至 **stdout**（Markdown 格式），不寫檔案，方便 Agent 管道使用。
 
 ## 注意事項
 
-### 安全性
-- ⚠️ **切勿**將 `.env` 文件提交到版本控制
-- ⚠️ 保護您的登入資訊，不要分享給他人
-- ✅ `.gitignore` 已配置忽略敏感文件
+- **登入欄位**：網站使用 `input[name="mobile"]`，不是 username
+- **記住我**：預設啟用，Cookies 持久化到 `/tmp/tasker_user_data_[帳號]`；清除用 `rm -rf /tmp/tasker_user_data_*`
+- **Lightbox 彈窗**：網站會自動彈出 `.box-lightbox` 遮擋頁面，程式會自動關閉
+- **CSS 選擇器脆弱**：網站 HTML 結構可能變化，若提取失敗請檢查 `references/REFERENCE.md`
 
-### 使用限制
-- 請遵守 Tasker 網站的使用條款
-- 適當設置爬取延遲，避免對網站造成壓力
-- 尊重網站的 robots.txt 規定
+## 測試
 
-### 開發狀態
-- 🟢 **第1項**：✅ 瀏覽器依賴安裝完成
-- 🟢 **第2項**：✅ 專案結構建立完成
-- 🟢 **選項1**：✅ 登入功能測試完成
-- 🟢 **新增功能**：✅ 『記住我』功能已實現並測試
-- 🟢 **功能優化**：✅ 使用正確的登入頁面
-- 🟡 **第3項**：數據爬取模組開發中
-- ⚪ **第4項**：輸出與格式化開發中
+需真實帳號與網路連線：
 
-## 故障排除
+```bash
+python test_login.py                                    # 測試登入
+python test_remember_me.py                             # 測試持久化 Cookies
+python test_search_accuracy.py                          # 搜尋結果正確性
+python test_search_accuracy.py --keywords "Linux"       # 帶關鍵字搜尋
+python test_search_accuracy.py --json                   # JSON 格式輸出
+```
 
-### 常見問題
+## 相關文件
 
-### 關於『記住我』功能
-
-1. **功能說明**：
-   - 預設啟用，會將登入 cookies 保存在系統臨時目錄
-   - 啟用後後續執行時無需重新登入，提高效率
-   - 持久化數據保存在 `/tmp/tasker_user_data_[用戶名]` 目錄
-
-2. **清除登入狀態**：
-   ```bash
-   # 方法1：停用記住我功能
-   # 編輯 .env 文件，設置：
-   REMEMBER_ME=false
-   
-   # 方法2：手動刪除持久化數據
-   rm -rf /tmp/tasker_user_data_[您的用戶名]
-   ```
-
-3. **測試記住我功能**：
-   ```bash
-   python test_remember_me.py
-   ```
-
-### 登入問題
-
-1. **登入失敗**
-   - 檢查 `.env` 文件中的登入資訊是否正確
-   - 確認網絡連接正常
-   - 查看日誌輸出了解具體錯誤
-
-2. **抓取不到數據**
-   - 檢查網站結構是否有變化
-   - 嘗試調整 CSS 選擇器
-   - 增加延遲時間
-
-3. **瀏覽器問題**
-   - 運行 `scrapling install` 重新安裝瀏覽器依賴
-   - 檢查系統依賴是否完整
-
-## 技術棧
-
-- **Python**: 3.10+
-- **Scrapling**: 0.4.7
-- **Playwright**: 瀏覽器自動化引擎
-- **python-dotenv**: 環境變數管理
-
-## 授權聲明
-
-本項目僅供學習和研究使用。使用者需自行負責確保遵守目標網站的使用條款和相關法律法規。
-
-## 支持與貢獻
-
-如有問題或建議，請通過以下方式聯繫：
-- 建立 Issue
-- 發送 Pull Request
-
----
-
-**生成時間**: 2026-05-04  
-**版本**: 1.0.0-alpha
+- [SKILL.md](SKILL.md) — Skill 定義與使用說明
+- [references/REFERENCE.md](references/REFERENCE.md) — CSS 選擇器參考
+- [references/TECHNICAL.md](references/TECHNICAL.md) — 設計決策
